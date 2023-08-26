@@ -1,6 +1,6 @@
 ---
 # defaults file for roles/bigip_f5_ucs
-big_ip_address: "10.146.10.44"
+big_ip_address: "192.168.155.5"
 tmp_dir: "/tmp"
 chunk_size: 1048576  # 1MB by default
 nfs_mount_point: /mnt/f5_nfs
