@@ -67,3 +67,19 @@ Include this role in your Ansible Playbook:
 - hosts: big_ip_servers
   roles:
     - name: your-role-name
+
+## Debugging
+
+Debug tasks are included within the role to help in troubleshooting. Look for lines starting with `=== IMPORTANT ===` and `=== ALERT ===` in the Ansible output for important messages.
+
+## License
+
+MIT
+
+## Contributing
+
+Contributions are welcome. Please submit pull requests for any enhancements.
+
+## Author
+
+Kyle Jones
