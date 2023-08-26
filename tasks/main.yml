@@ -1,0 +1,6 @@
+---
+# tasks file for roles/bigip_f5_ucs
+
+
+- name: Include BigIp UCS core playbook
+  include_tasks: f5_ucs_v3.yml

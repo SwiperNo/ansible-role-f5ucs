@@ -1,0 +1,134 @@
+---
+
+  - name: get current time on localhost
+    command: date "+%H%M%S-%m%d%y"
+    register: date
+    delegate_to: localhost
+    run_once: True
+
+  - name: set filename var on localhost
+    set_fact:
+      ucs: "{{ big_ip_address + '-' + date.stdout +  '-backup.ucs' }}"
+    delegate_to: localhost
+
+  - name: Initiate BIG-IP API Session
+    uri:
+      url: "https://{{ big_ip_address }}/mgmt/tm/sys/ucs"
+      method: GET
+      user: "{{ bigip_username }}"
+      password: "{{ bigip_password }}"
+      validate_certs: False
+      return_content: yes
+    register: api_response
+    delegate_to: localhost
+
+  - name: Create UCS backup on BIG-IP
+    uri:
+      url: "https://{{ big_ip_address }}/mgmt/tm/sys/ucs"
+      method: POST
+      user: "{{ bigip_username }}"
+      password: "{{ bigip_password }}"
+      validate_certs: False
+      body_format: json
+      body:
+        command: "save"
+        name: "{{ ucs }}"
+    when: api_response.status == 200
+    register: ucs_response
+    delegate_to: localhost
+
+  - name: Create directory for fragments
+    file:
+      path: "{{ tmp_dir }}/{{ ucs }}_fragments"
+      state: directory
+    delegate_to: localhost
+
+  - name: Fetch initial chunk of the UCS backup
+    uri:
+      url: "https://{{ big_ip_address }}/mgmt/shared/file-transfer/ucs-downloads/{{ ucs }}"
+      method: GET
+      user: "{{ bigip_username }}"
+      password: "{{ bigip_password }}"
+      validate_certs: False
+      dest: "{{ tmp_dir }}/{{ ucs }}_fragments/{{ ucs }}.part1"
+      status_code: [200,206]
+    register: initial_fetch
+    delegate_to: localhost
+    ignore_errors: yes
+
+  - name: Extract total file size from headers
+    set_fact:
+      total_file_size: "{{ initial_fetch.content_range.split('/')[-1] | int }}"
+    when: initial_fetch.status == 206
+
+  - name: Generate byte range for download
+    generate_range:
+      start: "{{ chunk_size }}"
+      end: "{{ total_file_size }}"
+      step: "{{ chunk_size }}"
+    register: byte_range_result
+  - name: Debug var
+    debug:
+      var: byte_range_result.byte_range
+
+  - name: Convert stdout string to a list
+    set_fact:
+      byte_range_list: "{{ byte_range_result.byte_range }}"
+  - name: Debug byte range
+    debug:
+      var: byte_range_list | length
+
+  - name: Generate sequence for file parts
+    set_fact:
+      sequence: "{{ range(2, byte_range_list | length + 1) | list }}"
+  - name: Debug sequence
+    debug:
+      var: sequence
+
+  - name: Download remaining chunks
+    uri:
+      url: "https://{{ big_ip_address }}/mgmt/shared/file-transfer/ucs-downloads/{{ ucs }}"
+      method: GET
+      user: "{{ bigip_username }}"
+      password: "{{ bigip_password }}"
+      headers:
+        Range: "bytes={{ byte_range_list[item - 2] }}-{{ (byte_range_list[item - 2] | int) + chunk_size - 1 }}"
+      validate_certs: False
+      dest: "{{ tmp_dir }}/{{ ucs }}_fragments/{{ ucs }}.part{{ item }}"
+      status_code: [200,206]
+    loop: "{{ sequence }}"
+    delegate_to: localhost
+    when: initial_fetch.status == 206
+    ignore_errors: yes
+
+  - name: Assemble file parts to form the complete file
+    assemble:
+      src: "{{ tmp_dir }}/{{ ucs }}_fragments"
+      dest: "{{ tmp_dir }}/{{ ucs }}"
+    when: initial_fetch.status == 206
+    delegate_to: localhost
+
+  - name: Move the assmebled UCS file to utility server
+    copy: 
+      src: "{{ tmp_dir }}/{{ ucs }}"
+      dest: "{{ nfs_mount_point }}/{{ ucs }}"
+    when: initial_fetch.status == 206
+    delegate_to: tpalnutility1
+
+  - name: Clean up part files and temp directory
+    file:
+      path: "{{ tmp_dir }}/{{ ucs }}_fragments"
+      state: absent
+    delegate_to: localhost
+    when: initial_fetch.status == 206
+
+  - name: Delete the UCS archive from BIG-IP after fetching
+    uri:
+      url: "https://{{ big_ip_address }}/mgmt/tm/sys/ucs/{{ ucs }}"
+      method: DELETE
+      user: "{{ bigip_username }}"
+      password: "{{ bigip_password }}"
+      validate_certs: False
+      status_code: 200
+    delegate_to: localhost
+    when: initial_fetch.status == 206
