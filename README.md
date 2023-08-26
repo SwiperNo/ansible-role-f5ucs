@@ -61,7 +61,6 @@ This role requires the following variables to be defined:
 11. **Delete UCS from BIG-IP**: Deletes the UCS file from the BIG-IP device post fetching.
 
 ## Usage
-
 Include this role in your Ansible Playbook:
 
 ```yaml
